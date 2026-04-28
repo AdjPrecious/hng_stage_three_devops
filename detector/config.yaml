@@ -1,0 +1,57 @@
+# HNG Anomaly Detection Engine Configuration
+# All thresholds live here — never hardcoded in logic files
+
+server:
+  dashboard_host: "0.0.0.0"
+  dashboard_port: 8888
+  audit_log_path: "/var/log/detector/audit.log"
+
+nginx:
+  log_path: "/var/log/nginx/hng-access.log"
+
+slack:
+  webhook_url: "${SLACK_WEBHOOK_URL}"  # Set via environment variable
+
+detection:
+  # Sliding window duration (seconds)
+  window_seconds: 60
+
+  # Baseline computation
+  baseline_window_minutes: 30       # Rolling window for mean/stddev
+  baseline_recalc_interval: 60      # Recalculate every N seconds
+  baseline_min_samples: 10          # Minimum samples before baseline is trusted
+  baseline_floor_mean: 1.0          # Floor value to avoid division by zero
+  baseline_floor_stddev: 0.5        # Floor stddev
+
+  # Anomaly thresholds
+  zscore_threshold: 3.0             # Flag if z-score exceeds this
+  rate_multiplier_threshold: 5.0    # Flag if rate > N * baseline_mean
+
+  # Error surge: tighten thresholds if error rate is 3x baseline error rate
+  error_surge_multiplier: 3.0
+  error_surge_zscore_tighten: 2.0   # Use this z-score when error surge detected
+  error_surge_rate_tighten: 3.0     # Use this multiplier when error surge detected
+
+  ip_whitelist:
+    - "127.0.0.1"
+    - "::1"
+    - "172.18.0.1"
+    - "172.17.0.1"
+    - "10.0.0.1"
+
+blocking:
+  # Backoff schedule in seconds: 10min, 30min, 2hr, permanent
+  ban_durations: [600, 1800, 7200, -1]   # -1 = permanent
+  permanent_after_strikes: 4             # After 4 bans, permanent
+
+  # Max time to add iptables rule (seconds)
+  block_timeout: 10
+
+  # Chain to use
+  iptables_chain: "INPUT"
+
+dashboard:
+  refresh_interval: 3               # seconds
+  top_ips_count: 10
+
+

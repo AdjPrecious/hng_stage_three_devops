@@ -1,0 +1,121 @@
+# Named volume shared between nginx (write) and detector (read-only)
+# Volume name: HNG-nginx-logs  (as specified in requirements)
+volumes:
+  HNG-nginx-logs:
+    name: HNG-nginx-logs
+  nextcloud-data:
+  nextcloud-db:
+  detector-logs:
+
+networks:
+  hng-net:
+    driver: bridge
+
+services:
+
+  # -------------------------------------------------------------------------
+  # Database for Nextcloud
+  # -------------------------------------------------------------------------
+  db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    networks: [hng-net]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-changeme_root}
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-changeme_nc}
+    volumes:
+      - nextcloud-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "sh", "-c", "mysqladmin ping -h localhost -u nextcloud -p$$MYSQL_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------------------
+  # Nextcloud — pre-built HNG image (do not modify)
+  # -------------------------------------------------------------------------
+  nextcloud:
+    image: kefaslungu/hng-nextcloud:latest
+    restart: unless-stopped
+    networks: [hng-net]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-changeme_nc}
+      NEXTCLOUD_ADMIN_USER: ${NC_ADMIN_USER:-admin}
+      NEXTCLOUD_ADMIN_PASSWORD: ${NC_ADMIN_PASSWORD:-changeme_admin}
+      NEXTCLOUD_TRUSTED_DOMAINS: ${SERVER_IP:-localhost} nginx
+    volumes:
+      - nextcloud-data:/var/www/html
+      # Mount the shared log volume read-only (as required)
+      - HNG-nginx-logs:/var/log/nginx:ro
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/status.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # -------------------------------------------------------------------------
+  # Nginx — reverse proxy with JSON logging to shared volume
+  # -------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.25-alpine
+    restart: unless-stopped
+    networks: [hng-net]
+    depends_on: [nextcloud]
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Nginx WRITES to this volume
+      - HNG-nginx-logs:/var/log/nginx
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # -------------------------------------------------------------------------
+  # Anomaly Detection Daemon
+  # -------------------------------------------------------------------------
+  detector:
+    build:
+      context: ./detector
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks: [hng-net]
+    depends_on: 
+      nginx:
+        condition: service_started
+    ports:
+      - "8888:8888"   # Dashboard
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    volumes:
+      # Read the Nginx logs (read-only)
+      - HNG-nginx-logs:/var/log/nginx:ro
+      # Persist audit logs
+      - detector-logs:/var/log/detector
+    # Run with host network for iptables access
+    # (alternatively use --cap-add NET_ADMIN NET_RAW)
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    # Required for iptables inside container
+    privileged: false
+    sysctls:
+      net.ipv4.ip_forward: 1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
