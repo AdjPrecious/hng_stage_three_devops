@@ -5,11 +5,12 @@ RUN apt-get update && apt-get install -y \
     iptables \
     iproute2 \
     procps \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install Python dependencies first (layer cache)
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -17,15 +18,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py ./
 COPY config.yaml ./
 
-# Create log directory
+# Create log directories
 RUN mkdir -p /var/log/detector /var/log/nginx
 
-# Non-root user for safety (iptables still needs CAP_NET_ADMIN from compose)
-RUN useradd -r -s /bin/false detector && \
-    chown -R detector:detector /app /var/log/detector
-# Note: /var/log/nginx is mounted from host, so we can't chown it here
-
-USER detector
+# Run as root so iptables works
+USER root
 
 EXPOSE 8888
 

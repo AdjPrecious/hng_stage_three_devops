@@ -92,28 +92,16 @@ services:
       context: ./detector
       dockerfile: Dockerfile
     restart: unless-stopped
-    networks: [hng-net]
-    depends_on: 
-      nginx:
-        condition: service_started
-    ports:
-      - "8888:8888"   # Dashboard
     environment:
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
     volumes:
-      # Read the Nginx logs (read-only)
       - HNG-nginx-logs:/var/log/nginx:ro
-      # Persist audit logs
       - detector-logs:/var/log/detector
-    # Run with host network for iptables access
-    # (alternatively use --cap-add NET_ADMIN NET_RAW)
     cap_add:
       - NET_ADMIN
       - NET_RAW
-    # Required for iptables inside container
-    privileged: false
-    sysctls:
-      net.ipv4.ip_forward: 1
+    privileged: true
+    network_mode: host
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/health')"]
       interval: 15s
